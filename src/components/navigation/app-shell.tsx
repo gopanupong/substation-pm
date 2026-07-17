@@ -1,17 +1,27 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth/context";
 import { useI18n } from "@/i18n/context";
 import { Sidebar } from "@/components/navigation/sidebar";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ReactNode } from "react";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading, isDemo } = useAuth();
   const { t } = useI18n();
+  const router = useRouter();
+  const pathname = usePathname();
 
-  if (loading) {
+  // ถ้าโหลดเสร็จแล้วยังไม่มี user → ไปหน้า login
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+    }
+  }, [loading, user, pathname, router]);
+
+  if (loading || !user) {
     return (
       <div className="flex h-screen">
         <div className="w-64 border-r p-4 space-y-3">
@@ -31,11 +41,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </div>
     );
-  }
-
-  if (!user) {
-    // redirect to login จะถูก middleware จัดการ แต่ fallback
-    return null;
   }
 
   return (
