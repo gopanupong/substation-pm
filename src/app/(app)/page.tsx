@@ -29,12 +29,23 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Awaited<ReturnType<typeof fetchDashboardStats>> | null>(null);
+  const [fatalError, setFatalError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
     fetchDashboardStats()
-      .then(setStats)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      .then((result) => {
+        if (!cancelled) setStats(result);
+      })
+      .catch((err) => {
+        // fetchDashboardStats ไม่ควร throw แล้ว (ใช้ allSettled) — ถ้าถึงตรงนี้แสดงว่ามีอะไรร้ายแรง
+        if (!cancelled) setFatalError(err?.message ?? String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   // ---- pie data สถานะงาน ----
@@ -74,21 +85,36 @@ export default function DashboardPage() {
     );
   }
 
-  if (!stats) {
+  // กรณี 1: fetchDashboardStats throw จริง ๆ (ควรเกิดน้อยมากเพราะใช้ allSettled)
+  if (fatalError) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-        <AlertCircle className="size-12 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">{t.noData}</h2>
-        <p className="text-sm text-muted-foreground max-w-md">
-          {locale === "th"
-            ? "ไม่สามารถโหลดข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อระบบหรือลองเข้าสู่ระบบใหม่อีกครั้ง"
-            : "Unable to load data. Please check your connection or try signing in again."}
-        </p>
-        <Button variant="outline" onClick={() => window.location.reload()}>
-          {locale === "th" ? "ลองอีกครั้ง" : "Retry"}
-        </Button>
-      </div>
+      <ErrorState
+        title={t.loadDataError}
+        description={t.loadDataErrorDesc}
+        rawError={fatalError}
+        hint={t.migrationsHint}
+        onRetry={() => window.location.reload()}
+        retryLabel={locale === "th" ? "ลองอีกครั้ง" : "Retry"}
+      />
     );
+  }
+
+  // กรณี 2: โหลดได้แต่ทุก query fail (เช่นยังไม่ได้รัน migrations บน Supabase จริง)
+  if (stats && stats.errors.length === 4) {
+    return (
+      <ErrorState
+        title={t.loadDataError}
+        description={t.loadDataErrorDesc}
+        rawError={stats.errors.map((e) => `[${e.key}] ${e.message}`).join("\n")}
+        hint={t.migrationsHint}
+        onRetry={() => window.location.reload()}
+        retryLabel={locale === "th" ? "ลองอีกครั้ง" : "Retry"}
+      />
+    );
+  }
+
+  if (!stats) {
+    return null;
   }
 
   const canCreate = user?.role === "admin" || user?.role === "manager";
@@ -107,6 +133,23 @@ export default function DashboardPage() {
           </Link>
         )}
       </div>
+
+      {/* Partial-load warning: มี query บางตัว fail แต่ UI ยังแสดงข้อมูลที่โหลดได้ */}
+      {stats.errors.length > 0 && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:border-amber-700/40 dark:bg-amber-950/30 p-3 text-sm">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="size-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="space-y-1">
+              <p className="font-medium text-amber-800 dark:text-amber-300">{t.partialLoadWarning}</p>
+              <ul className="text-xs text-amber-700 dark:text-amber-400/90 space-y-0.5">
+                {stats.errors.map((e) => (
+                  <li key={e.key} className="font-mono">[{e.key}] {e.message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ====== STATS CARDS ====== */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -317,5 +360,36 @@ function StatCard({ icon, value, label, color }: { icon: React.ReactNode; value:
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ====== Error State Component ======
+function ErrorState({
+  title, description, rawError, hint, onRetry, retryLabel,
+}: {
+  title: string;
+  description: string;
+  rawError: string;
+  hint?: string;
+  onRetry: () => void;
+  retryLabel: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
+      <AlertCircle className="size-12 text-destructive" />
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="text-sm text-muted-foreground max-w-md">{description}</p>
+
+      {/* raw error เพื่อให้วินิจฉัยได้ เช่น relation "projects" does not exist */}
+      <pre className="max-w-2xl w-full text-left text-xs bg-muted rounded-lg p-3 overflow-auto whitespace-pre-wrap break-words font-mono text-destructive">
+        {rawError}
+      </pre>
+
+      {hint && (
+        <p className="text-xs text-muted-foreground max-w-md">{hint}</p>
+      )}
+
+      <Button variant="outline" onClick={onRetry}>{retryLabel}</Button>
+    </div>
   );
 }
