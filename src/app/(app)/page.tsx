@@ -74,7 +74,22 @@ export default function DashboardPage() {
     );
   }
 
-  if (!stats) return null;
+  if (!stats) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <AlertCircle className="size-12 text-muted-foreground" />
+        <h2 className="text-lg font-semibold">{t.noData}</h2>
+        <p className="text-sm text-muted-foreground max-w-md">
+          {locale === "th"
+            ? "ไม่สามารถโหลดข้อมูลได้ กรุณาตรวจสอบการเชื่อมต่อระบบหรือลองเข้าสู่ระบบใหม่อีกครั้ง"
+            : "Unable to load data. Please check your connection or try signing in again."}
+        </p>
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          {locale === "th" ? "ลองอีกครั้ง" : "Retry"}
+        </Button>
+      </div>
+    );
+  }
 
   const canCreate = user?.role === "admin" || user?.role === "manager";
 

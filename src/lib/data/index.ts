@@ -435,13 +435,67 @@ export async function updateProfile(id: string, input: Partial<Profile>): Promis
 }
 
 // ============ DASHBOARD STATS ============
-export async function fetchDashboardStats() {
-  const [projects, tasks, reports, logs] = await Promise.all([
-    fetchProjects(),
-    fetchTasks(),
-    fetchReports(),
-    fetchActivityLogs(6),
-  ]);
+export interface DashboardError {
+  /** ชื่อ query ที่ fail (projects / tasks / reports / logs) */
+  key: "projects" | "tasks" | "reports" | "logs";
+  /** error message ดิบจาก Supabase เพื่อให้วินิจฉัยได้ */
+  message: string;
+}
+
+export interface DashboardStats {
+  projects: Project[];
+  tasks: Task[];
+  reports: ProgressReport[];
+  logs: ActivityLog[];
+  activeProjects: number;
+  openTasks: number;
+  delayed: number;
+  avgProgress: number;
+  statusCount: Record<string, number>;
+  /** query ที่ fail (ถ้ามี) — ว่าง = โหลดสำเร็จทุกตัว */
+  errors: DashboardError[];
+}
+
+/**
+ * โหลดข้อมูล dashboard แบบทนทาน: ใช้ Promise.allSettled
+ * ถ้า query บางตัว fail (เช่นตารางยังไม่ถูกสร้าง) ส่วนที่สำเร็จยังคืนมาแสดงได้
+ * ฟังก์ชันนี้จะไม่ throw (เว้นแต่เกิด error นอกเหนือจาก query) ผู้เรียกตรวจ `errors` แทน
+ */
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  const entries = [
+    { key: "projects" as const, fn: () => fetchProjects() },
+    { key: "tasks" as const, fn: () => fetchTasks() },
+    { key: "reports" as const, fn: () => fetchReports() },
+    { key: "logs" as const, fn: () => fetchActivityLogs(6) },
+  ];
+
+  const settled = await Promise.allSettled(entries.map((e) => e.fn()));
+
+  const projects: Project[] = [];
+  const tasks: Task[] = [];
+  const reports: ProgressReport[] = [];
+  const logs: ActivityLog[] = [];
+  const errors: DashboardError[] = [];
+
+  settled.forEach((result, i) => {
+    const { key } = entries[i];
+    if (result.status === "fulfilled") {
+      const value = result.value as typeof projects | typeof tasks | typeof reports | typeof logs;
+      if (key === "projects") (projects as typeof value).push(...(value as Project[]));
+      else if (key === "tasks") (tasks as typeof value).push(...(value as Task[]));
+      else if (key === "reports") (reports as typeof value).push(...(value as ProgressReport[]));
+      else (logs as typeof value).push(...(value as ActivityLog[]));
+    } else {
+      // ดึง message ที่อ่านง่าย: Supabase error จะมี .message, Error ทั่วไปใช้ .message
+      const raw = result.reason;
+      const message =
+        (raw && typeof raw === "object" && "message" in raw && String((raw as { message: unknown }).message)) ||
+        (typeof raw === "string" && raw) ||
+        "Unknown error";
+      errors.push({ key, message });
+    }
+  });
+
   const activeProjects = projects.filter((p) => p.status === "active").length;
   const openTasks = tasks.filter((t) => t.status !== "done").length;
   const delayed = projects.filter((p) => p.status === "delayed").length;
@@ -456,5 +510,6 @@ export async function fetchDashboardStats() {
   return {
     projects, tasks, reports, logs,
     activeProjects, openTasks, delayed, avgProgress, statusCount,
+    errors,
   };
 }
