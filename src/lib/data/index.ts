@@ -477,14 +477,16 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   const logs: ActivityLog[] = [];
   const errors: DashboardError[] = [];
 
-  settled.forEach((result, i) => {
+  for (let i = 0; i < settled.length; i++) {
     const { key } = entries[i];
+    const result = settled[i];
     if (result.status === "fulfilled") {
-      const value = result.value as typeof projects | typeof tasks | typeof reports | typeof logs;
-      if (key === "projects") (projects as typeof value).push(...(value as Project[]));
-      else if (key === "tasks") (tasks as typeof value).push(...(value as Task[]));
-      else if (key === "reports") (reports as typeof value).push(...(value as ProgressReport[]));
-      else (logs as typeof value).push(...(value as ActivityLog[]));
+      // กระจายผลลัพธ์ลง array ที่ถูกต้องตาม key — ทำใน branch แยกเพื่อให้ TS narrow
+      // type ของ result.value ได้ ไม่ต้องสร้าง union ที่อาจถูกลดเป็น never
+      if (key === "projects") projects.push(...(result.value as Project[]));
+      else if (key === "tasks") tasks.push(...(result.value as Task[]));
+      else if (key === "reports") reports.push(...(result.value as ProgressReport[]));
+      else logs.push(...(result.value as ActivityLog[]));
     } else {
       // ดึง message ที่อ่านง่าย: Supabase error จะมี .message, Error ทั่วไปใช้ .message
       const raw = result.reason;
@@ -494,7 +496,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
         "Unknown error";
       errors.push({ key, message });
     }
-  });
+  }
 
   const activeProjects = projects.filter((p) => p.status === "active").length;
   const openTasks = tasks.filter((t) => t.status !== "done").length;
